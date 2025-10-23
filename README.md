@@ -12,6 +12,19 @@ PyQUDA is a Python interface for QUDA (QCD on CUDA), a library for lattice QCD c
 - Intel oneAPI toolkit with SYCL support
 - Python environment with PyTorch and opt-einsum
 
+## Python Environment Setup
+
+It's recommended to use a virtual environment for this setup:
+
+```bash
+# Create a virtual environment
+python3 -m venv pyquda_env
+source pyquda_env/bin/activate
+
+# Install XPU PyTorch packages
+python3 -m pip install --no-deps torch==2.9.0+xpu torchvision==0.24.0+xpu torchaudio==2.9.0+xpu --index-url https://download.pytorch.org/whl/xpu
+```
+
 ## Installation Steps
 
 ### 1. Install QUDA with SYCL Support
@@ -24,6 +37,23 @@ cd quda
 ```
 
 Configure and build QUDA for Intel GPU:
+
+**Important**: Before running `./configure-quda`, you need to modify the paths in the script:
+
+1. **Update the prefix path** (around line 74, 78, 88, 94):
+   ```bash
+   # Change these lines to your desired installation directory
+   prefix="/your/desired/installation/path"
+   ```
+
+2. **Update the QUDA source path** (around line 170-171):
+   ```bash
+   # Change this line to point to your QUDA source directory
+   echo $CMAKE --fresh $o /path/to/your/quda/source
+   $CMAKE --fresh $o /path/to/your/quda/source
+   ```
+
+Then run the configuration and build:
 
 ```bash
 ./configure-quda
