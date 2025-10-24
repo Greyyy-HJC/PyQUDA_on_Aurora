@@ -10,7 +10,7 @@ PyQUDA is a Python interface for QUDA (QCD on CUDA), a library for lattice QCD c
 
 - Access to Aurora supercomputer
 - Intel oneAPI toolkit with SYCL support
-- Python environment with PyTorch and opt-einsum
+- Python environment: PyTorch (for Torch backend) or dpnp, and opt-einsum
 
 ## Python Environment Setup
 
@@ -66,9 +66,9 @@ The `configure-quda` script sets up the following key configurations:
 - **Compilers**: Intel SYCL compilers (`icpx`, `mpicxx`)
 - **Features**: Multi-grid, distance preconditioning, QDP-JIT interface
 
-### 2. Configure opt-einsum for Intel GPU Support
+### 2. Configure opt-einsum for Intel GPU Support (Torch backend)
 
-The Intel GPU (XPU) torch backend does not support complex tensor operations. To handle this limitation, you have two options:
+If you use the Torch XPU backend, note that complex tensor operations are not supported natively. To handle this limitation, you have two options:
 
 #### Option A: Use sitecustomize.py (Recommended)
 
@@ -109,35 +109,74 @@ import pyquda
 pyquda.init(backend="torch", torch_backend="xpu")
 ```
 
-## Usage Example
+### 4. Alternative: Using dpnp for Complex Matrix Operations
+
+For better support of complex matrix einsum operations on Intel GPU, you can use [dpnp](https://github.com/IntelPython/dpnp) as an alternative backend. dpnp is Intel's data parallel extension for NumPy that provides optimized operations on Intel GPUs.
+
+#### Install dpnp
+
+```bash
+# Install dpnp via pip
+python -m pip install --index-url https://software.repos.intel.com/python/pypi dpnp
+```
+
+#### Configure PyQUDA with dpnp
 
 ```python
 import pyquda
-import torch
+import dpnp as np
 
-# Initialize PyQUDA with Intel GPU backend
-pyquda.init(backend="torch", torch_backend="xpu")
+# Initialize PyQUDA with dpnp backend
+pyquda.init(backend="dpnp")
 
-# Your PyQUDA computations will now run on Intel GPU
-# PyQUDA will automatically handle tensor operations on XPU
+# dpnp provides native support for complex matrix operations on Intel GPU
+# This eliminates the need for CPU fallbacks in complex einsum operations
 ```
 
-## Important Notes
+#### Benefits of dpnp
 
-- **Complex Operations**: Some complex tensor operations may fallback to CPU due to oneDNN limitations on Intel GPU
-- **Memory Management**: Ensure sufficient GPU memory for your computations
-- **Performance**: The SYCL backend is optimized for Intel PVC GPUs on Aurora
-- **Automatic Patching**: The sitecustomize.py file automatically handles XPU complex tensor fallbacks
+- **Native Complex Support**: Full support for complex tensor operations on Intel GPU
+- **Optimized Performance**: Intel-optimized implementations for Intel GPU hardware
+- **NumPy Compatibility**: Drop-in replacement for NumPy with GPU acceleration
+- **No Fallback Required**: Eliminates the need for CPU fallbacks in complex operations
+- **No PyTorch Dependency**: dpnp works independently without requiring PyTorch installation
 
-## Troubleshooting
+## Usage Examples
 
-1. **Device Detection Issues**: Ensure Intel GPU drivers and oneAPI toolkit are properly installed
-2. **Memory Errors**: Reduce problem size or use CPU fallback for large computations
-3. **Compilation Issues**: Check that all SYCL environment variables are set correctly
-4. **PYTHONPATH Issues**: Ensure sitecustomize.py is in a directory that's in your PYTHONPATH
+### Torch XPU backend
+```python
+import pyquda
+import torch  # ensure XPU build installed with --no-deps
 
-## References
+pyquda.init(backend="torch", torch_backend="xpu")
+```
 
-- [QUDA Documentation](https://github.com/lattice/quda)
-- [Intel oneAPI SYCL](https://www.intel.com/content/www/us/en/developer/tools/oneapi/sycl.html)
-- [PyQUDA Documentation](https://github.com/claudiopica/PyQUDA) 
+### dpnp backend
+```python
+import pyquda
+import dpnp as np
+
+pyquda.init(backend="dpnp")
+```
+
+## Log (Hacking PyQUDA on Aurora)
+
+1. Initial validation (NumPy backend works):
+   - QUDA and PyQUDA were built and installed successfully.
+   - Because the `cupy` backend is not usable on Intel GPUs, we first validated functionality with the `numpy` backend.
+   - Both pion 2pt and proton 2pt tests passed, but performance was slow.
+
+2. Trying the Torch XPU backend (install with --no-deps):
+   - To improve performance, we switched the backend to Torch (XPU build).
+   - When installing the XPU build via pip, add `--no-deps` to avoid polluting the MPI environment: the XPU build of Torch brings Intel oneAPI/IMPI runtime shared libraries that can overshadow the system MPI and libfabric paths, causing `mpi4py` to link against the wrong objects during initialization.
+
+3. Complex matmul limitation in XPU Torch and the temporary workaround:
+   - We found XPU Torch lacks support for complex matrix multiplication. Both `opt_einsum` and `torch.einsum` fail on complex contractions with errors like: `RuntimeError: Complex data type matmul is not supported in oneDNN`.
+   - Temporary workaround: use `sitecustomize.py` to force `opt_einsum` contractions to run on the CPU and then move the result back to XPU. This works but adds CPU round-trips and overhead.
+
+4. Adopting the dpnp backend (native complex einsum):
+   - We evaluated Intel-maintained `dpnp` (Data Parallel Extension for NumPy). Tests show `dpnp.einsum` natively supports complex matrix multiplication on Intel GPUs.
+   - We added `dpnp` as a PyQUDA backend option and prefer `dpnp.einsum` on contraction paths to keep Aurora behavior as close as possible to the `cupy` backend.
+   - Note: when choosing the `dpnp` path, do not install Torch (XPU) to avoid introducing oneAPI/IMPI runtimes that can pollute MPI. See the `dpnp` repository for details: https://github.com/IntelPython/dpnp
+
+ 
