@@ -156,7 +156,7 @@ pyquda.init(backend="torch", torch_backend="xpu")
 import pyquda
 import dpnp as np
 
-pyquda.init(backend="dpnp")
+pyquda.init(backend="dpnp", backend_target="sycl")
 ```
 
 ## Log (Hacking PyQUDA on Aurora)
@@ -176,6 +176,7 @@ pyquda.init(backend="dpnp")
 
 4. Adopting the dpnp backend (native complex einsum):
    - We evaluated Intel-maintained `dpnp` (Data Parallel Extension for NumPy). Tests show `dpnp.einsum` natively supports complex matrix multiplication on Intel GPUs.
+   - Both pion 2pt and proton 2pt tests passed successfully with the dpnp backend, confirming full functionality.
    - We added `dpnp` as a PyQUDA backend option and prefer `dpnp.einsum` on contraction paths to keep Aurora behavior as close as possible to the `cupy` backend.
    - Note: when choosing the `dpnp` path, do not install Torch (XPU) to avoid introducing oneAPI/IMPI runtimes that can pollute MPI. See the `dpnp` repository for details: https://github.com/IntelPython/dpnp
 
