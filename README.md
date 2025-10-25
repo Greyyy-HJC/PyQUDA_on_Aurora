@@ -21,8 +21,15 @@ It's recommended to use a virtual environment for this setup:
 python3 -m venv pyquda_env
 source pyquda_env/bin/activate
 
-# Install XPU PyTorch packages
+# Choose one of the following backend options:
+# Option 1: NumPy backend (slowest but most compatible)
+No additional packages needed beyond PyQUDA dependencies
+
+# Option 2: Torch XPU backend (requires --no-deps to avoid MPI pollution)
 python3 -m pip install --no-deps torch==2.9.0+xpu torchvision==0.24.0+xpu torchaudio==2.9.0+xpu --index-url https://download.pytorch.org/whl/xpu
+
+# Option 3: dpnp backend (recommended for Intel GPU)
+python3 -m pip install --index-url https://software.repos.intel.com/python/pypi dpnp
 ```
 
 ## Installation Steps
@@ -66,82 +73,81 @@ The `configure-quda` script sets up the following key configurations:
 - **Compilers**: Intel SYCL compilers (`icpx`, `mpicxx`)
 - **Features**: Multi-grid, distance preconditioning, QDP-JIT interface
 
-### 2. Configure opt-einsum for Intel GPU Support (Torch backend)
+### 2. Configure PyQUDA Backend
 
-If you use the Torch XPU backend, note that complex tensor operations are not supported natively. To handle this limitation, you have two options:
+Choose one of the following three backend options:
 
-#### Option A: Use sitecustomize.py (Recommended)
+#### Option 1: NumPy Backend (Baseline)
 
-Place the provided `sitecustomize.py` file in any directory that is in your `PYTHONPATH`. For example:
-
-```bash
-# Option 1: Add to your current directory
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-
-# Option 2: Copy to a system-wide location
-cp sitecustomize.py /path/to/your/python/site-packages/
-
-# Option 3: Add to your project directory and include in PYTHONPATH
-export PYTHONPATH="${PYTHONPATH}:/path/to/your/project"
+```python
+import pyquda
+pyquda.init(backend="numpy")
 ```
 
-**What the sitecustomize.py does:**
-- Automatically patches opt-einsum's contract function
-- Detects XPU complex tensors and falls back to CPU computation
-- Transfers results back to XPU device when appropriate
-- No source code modification required
+**Pros**: Most compatible, no additional setup required
+**Cons**: Slowest performance, CPU-only operations
 
-#### Option B: Replace torch.py (Alternative)
+#### Option 2: Torch XPU Backend (with workarounds)
 
-If you prefer to modify the opt-einsum source code directly, replace the `opt-einsum/backends/torch.py` file with the provided modified version.
+First, install Torch XPU with `--no-deps` to avoid MPI pollution:
 
-**Key modifications include:**
-- XPU device detection and handling
-- Fallback to CPU for complex tensor operations (due to oneDNN limitations on XPU)
-- Proper device management for mixed CPU/GPU operations
+```bash
+python3 -m pip install --no-deps torch==2.9.0+xpu torchvision==0.24.0+xpu torchaudio==2.9.0+xpu --index-url https://download.pytorch.org/whl/xpu
+```
 
-### 3. Configure PyQUDA Backend
-
-Initialize PyQUDA with the correct backend settings:
+Configure PyQUDA:
 
 ```python
 import pyquda
 pyquda.init(backend="torch", torch_backend="xpu")
 ```
 
-### 4. Alternative: Using dpnp for Complex Matrix Operations
-
-For better support of complex matrix einsum operations on Intel GPU, you can use [dpnp](https://github.com/IntelPython/dpnp) as an alternative backend. dpnp is Intel's data parallel extension for NumPy that provides optimized operations on Intel GPUs.
-
-#### Install dpnp
+**Complex tensor workaround**: Since XPU Torch doesn't support complex matrix multiplication, use the provided `sitecustomize.py`:
 
 ```bash
-# Install dpnp via pip
-python -m pip install --index-url https://software.repos.intel.com/python/pypi dpnp
+# Add to PYTHONPATH
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 ```
 
-#### Configure PyQUDA with dpnp
+**What the sitecustomize.py does:**
+- Automatically patches opt-einsum's contract function
+- Detects XPU complex tensors and falls back to CPU computation
+- Transfers results back to XPU device when appropriate
+
+**Pros**: Good performance for non-complex operations
+**Cons**: Complex operations require CPU fallback, MPI environment pollution risk
+
+#### Option 3: dpnp Backend (Recommended)
+
+Install dpnp:
+
+```bash
+python3 -m pip install --index-url https://software.repos.intel.com/python/pypi dpnp
+```
+
+Configure PyQUDA:
 
 ```python
 import pyquda
 import dpnp as np
-
-# Initialize PyQUDA with dpnp backend
-pyquda.init(backend="dpnp")
-
-# dpnp provides native support for complex matrix operations on Intel GPU
-# This eliminates the need for CPU fallbacks in complex einsum operations
+pyquda.init(backend="dpnp", backend_target="sycl")
 ```
 
-#### Benefits of dpnp
+**Pros**: 
+- Native complex tensor support on Intel GPU
+- No CPU fallbacks needed
+- Intel-optimized performance
+- No PyTorch dependency (avoids MPI pollution)
 
-- **Native Complex Support**: Full support for complex tensor operations on Intel GPU
-- **Optimized Performance**: Intel-optimized implementations for Intel GPU hardware
-- **NumPy Compatibility**: Drop-in replacement for NumPy with GPU acceleration
-- **No Fallback Required**: Eliminates the need for CPU fallbacks in complex operations
-- **No PyTorch Dependency**: dpnp works independently without requiring PyTorch installation
+**Cons**: Requires dpnp installation
 
 ## Usage Examples
+
+### NumPy backend
+```python
+import pyquda
+pyquda.init(backend="numpy")
+```
 
 ### Torch XPU backend
 ```python
@@ -157,6 +163,19 @@ import pyquda
 import dpnp as np
 
 pyquda.init(backend="dpnp", backend_target="sycl")
+
+# point_pion.append(
+#    core.gatherLattice(
+#       contract("wtzyxjiba,wtzyxjiba->t", point_propag.data.conj(), point_propag.data).real.get(), [0, -1, -1, -1]
+#    )
+# )
+
+point_pion.append(
+   core.gatherLattice(
+      dnp.asnumpy(dnp.einsum("wtzyxjiba,wtzyxjiba->t", point_propag.data.conj(), point_propag.data)).real, [0, -1, -1, -1]
+   )
+)
+
 ```
 
 ## Log (Hacking PyQUDA on Aurora)
